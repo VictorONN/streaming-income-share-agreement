@@ -1,5 +1,5 @@
 // SAVING & LENDING APP FOR STREAMING INCOME
-// A smart pool that enables investors to secure loans through locking their future-income streams.
+// A smart contract that enables people to secure loans from investors by locking their future-income streams using Superfluid constant flow agreements.
 // Instantiate the contract with a few
 
 pragma solidity 0.8.0;
@@ -11,45 +11,56 @@ pragma solidity 0.8.0;
 contract IncomeShareAgreement {
     mapping(address => uint256) public investorsAmounts;
     uint256 public totalValueLocked;
+    uint256 public totalValueBorrowed;
 
     //BORROWERS
-    mapping(address => uint256) public addressToIncomeFlowRate;
-    mapping(address => uint256) public monthlyIncome;
-    mapping(address => uint256) public incomePercentage;
-    mapping(address => uint256) public addressToTimeLocked;
+    mapping(address => uint256) public outstandingBorrowers;
+    // mapping(address => uint256) public addressToIncomeFlowRate;
+    // mapping(address => uint256) public monthlyIncome;
+    // mapping(address => uint256) public incomePercentage;
+    // mapping(address => uint256) public addressToTimeLocked;
 
-    uint256 public inflowOutflowPoolRatio; //at least over 0.5??
+    // uint256 public inflowOutflowPoolRatio; //at least over 0.5??
     uint256 public minimumInvestableAmount;
     uint256 public maximumBorrowPercentage;
-    uint public _minimumIncomeFlowRate;
-    
-    event Received(address, uint256);
+    uint256 public minimumIncomeFlowRate;
+    uint256 public interestRate;
 
-    modifier onlyMembers() {
-        require(!addressToIncomeFlowRate[msg.sender] == 0, "not member");
-        _;
-    }
+    event Received(address, uint256);
 
     constructor(
         uint256 _minimumInvestableAmount,
-        uint256 _maximumBorrowPercentage
+        uint256 _maximumBorrowPercentage,
+        uint256 _minimumIncomeFlowRate,
+        uint256 _interestRate
     ) {
         minimumInvestableAmount = _minimumInvestableAmount;
         maximumBorrowPercentage = _maximumBorrowPercentage;
+        minimumIncomeFlowRate = _minimumIncomeFlowRate;
+        interestRate = _interestRate;
     }
 
-    //deposit ether into the pool
-    receive() external payable {
-        emit Received(msg.sender, msg.value);
-        //keep track of the ether
-    }
+    //    function savingsToBorrowRatio(
+    //         uint256 totalValueLocked,
+    //         uint256 totalValueBorrowed
+    //     ) internal returns (uint256) {
+    //         uint256 ratio = totalValueBorrowed / totalValueLocked;
+    //         return ratio;
+    //     }
+
+    // //deposit ether into the pool
+    // receive() external payable {
+    //     emit Received(msg.sender, msg.value);
+    //     //keep track of the ether
+    // }
 
     function calculateIncomePercentage(
         uint256 _amountToBorrow,
+        uint256 _incomePerSecond,
         uint256 _incomeFlowRate
     ) internal returns (uint256) {
-        uint256 totalMoneyEarnedDuringLoan =
-            monthlyIncome[address] * _loanDuration;
+        uint256 loanDuration = _amountToBorrow / _incomeFlowRate;
+        uint256 totalMoneyEarnedDuringLoan = incomePerSecond * loanDuration;
         uint256 borrowPercent =
             (_amountToBorrow / totalMoneyEarnedDuringLoan) * 100;
         require(
@@ -76,20 +87,40 @@ contract IncomeShareAgreement {
         totalValueLocked += _amount;
     }
 
-    function borrow(uint256 _borrowAmount) public onlyMembers() {
+    // function qualifyBorrower(
+    //     uint256 _amountToBorrow,
+    //     uint256 _incomePerSecond,
+    //     uint256 _incomeFlowRate //repaying suggested
+    // ) internal {
+    //     uint256 borrowPercent =
+    //         calculateIncomePercentage(_amountToBorrow, _incomeFlowRate);
+    //     require(
+    //         borrowPercent <= maximumBorrowPercentage,
+    //         "above borrow limit, reduce borrowAmount"
+    //     );
+    //     // addressToIncomeFlowRate[msg.sender] = _incomeFlowRate;
+    //     qualifiedToBorrow[msg.sender] = true;
+    // }
+
+    function borrow(
+        uint256 _amountToBorrow,
+        uint256 _incomePerSecond,
+        uint256 _incomeFlowRate
+    ) public {
+        uint256 borrowPercent =
+            calculateIncomePercentage(_amountToBorrow, _incomeFlowRate);
         require(
-            addressToAmount[msg.sender] >= maximumBorrowAmount,
-            "not enough money available to withdraw"
+            borrowPercent <= maximumBorrowPercentage,
+            "above borrow limit, reduce borrowAmount"
         );
-        _calculateIncomePercentage();
+        payable(msg.sender).transfer(_amountToBorrow);
+        repayBorrow(_amountBorrowed);
+        outstandingBorrowers[msg.sender] = _amountToBorrow;
     }
 
-    function qualifyBorrower(
-        uint _amountToBorrow,
-        uint256 _monthlyIncome,
-        uint256 _incomeFlowRate,
-        uint256 _duration
-    ) external {
-        addressToIncomeFlowRate[msg.sender]
+    function repayBorrow(uint256 _amountBorrowed) internal {
+        amountToPay = _amountBorrowed + interestRate * _amountBorrowed;
+        //SUPERFLUID STREAM TO TRANSFER FUNDS INSTEAD OF TRANSFERFROM
+        address(this).transferFrom(msg.sender, _amountBorrowed);
     }
 }

@@ -1,26 +1,30 @@
-// SAVING & LENDING APP FOR STREAMING INCOME
-// A smart contract that enables people to secure loans from investors by locking their future-income streams using Superfluid constant flow agreements.
-// Instantiate the contract with a few
-
 pragma solidity 0.8.0;
-
 // SPDX-License-Identifier: MIT
 
-// import ‘./SuperTokenInterface.sol’;
+import {
+    ISuperfluid,
+    ISuperToken,
+    ISuperApp,
+    ISuperAgreement,
+    SuperAppDefinitions
+} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol"; //"@superfluid-finance/ethereum-monorepo/packages/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
 
-contract IncomeShareAgreement {
+import {
+    IConstantFlowAgreementV1
+} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/IConstantFlowAgreementV1.sol";
+
+import {
+    SuperAppBase
+} from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
+
+contract IncomeShareAgreement is SuperAppBase {
     mapping(address => uint256) public investorsAmounts;
     uint256 public totalValueLocked;
     uint256 public totalValueBorrowed;
 
     //BORROWERS
     mapping(address => uint256) public outstandingBorrowers;
-    // mapping(address => uint256) public addressToIncomeFlowRate;
-    // mapping(address => uint256) public monthlyIncome;
-    // mapping(address => uint256) public incomePercentage;
-    // mapping(address => uint256) public addressToTimeLocked;
 
-    // uint256 public inflowOutflowPoolRatio; //at least over 0.5??
     uint256 public minimumInvestableAmount;
     uint256 public maximumBorrowPercentage;
     uint256 public minimumIncomeFlowRate;
@@ -28,16 +32,47 @@ contract IncomeShareAgreement {
 
     event Received(address, uint256);
 
+    ISuperfluid private _host; // host
+    IConstantFlowAgreementV1 private _cfa; // the stored constant flow agreement class address
+    ISuperToken private _acceptedToken; // accepted token
+    address private _receiver;
+
     constructor(
         uint256 _minimumInvestableAmount,
         uint256 _maximumBorrowPercentage,
         uint256 _minimumIncomeFlowRate,
-        uint256 _interestRate
+        uint256 _interestRate,
+        ISuperfluid host,
+        IConstantFlowAgreementV1 cfa,
+        ISuperToken acceptedToken,
+        address receiver
     ) {
+        require(address(host) != address(0), "host is zero address");
+        require(address(cfa) != address(0), "cfa is zero address");
+        require(
+            address(acceptedToken) != address(0),
+            "acceptedToken is zero address"
+        );
+        require(address(receiver) != address(0), "receiver is zero address");
+        require(!host.isApp(ISuperApp(receiver)), "receiver is an app");
+
         minimumInvestableAmount = _minimumInvestableAmount;
         maximumBorrowPercentage = _maximumBorrowPercentage;
         minimumIncomeFlowRate = _minimumIncomeFlowRate;
         interestRate = _interestRate;
+
+        _host = host;
+        _cfa = cfa;
+        _acceptedToken = acceptedToken;
+        _receiver = receiver;
+
+        uint256 configWord =
+            SuperAppDefinitions.APP_LEVEL_FINAL |
+                SuperAppDefinitions.BEFORE_AGREEMENT_CREATED_NOOP |
+                SuperAppDefinitions.BEFORE_AGREEMENT_UPDATED_NOOP |
+                SuperAppDefinitions.BEFORE_AGREEMENT_TERMINATED_NOOP;
+
+        _host.registerApp(configWord);
     }
 
     //    function savingsToBorrowRatio(

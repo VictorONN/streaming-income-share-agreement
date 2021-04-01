@@ -158,4 +158,82 @@ contract IncomeShareAgreement is SuperAppBase {
         //SUPERFLUID STREAM TO TRANSFER FUNDS INSTEAD OF TRANSFERFROM
         address(this).transferFrom(msg.sender, _amountBorrowed);
     }
+
+    /**************************************************************************
+     * SuperApp callbacks
+     *************************************************************************/
+
+    function afterAgreementCreated(
+        ISuperToken _superToken,
+        address _agreementClass,
+        bytes32, // _agreementId,
+        bytes calldata, /*_agreementData*/
+        bytes calldata, // _cbdata,
+        bytes calldata _ctx
+    )
+        external
+        override
+        onlyExpected(_superToken, _agreementClass)
+        onlyHost
+        returns (bytes memory newCtx)
+    {
+        return _updateOutflow(_ctx);
+    }
+
+    function afterAgreementUpdated(
+        ISuperToken _superToken,
+        address _agreementClass,
+        bytes32, //_agreementId,
+        bytes calldata agreementData,
+        bytes calldata, //_cbdata,
+        bytes calldata _ctx
+    )
+        external
+        override
+        onlyExpected(_superToken, _agreementClass)
+        onlyHost
+        returns (bytes memory newCtx)
+    {
+        return _updateOutflow(_ctx);
+    }
+
+    function afterAgreementTerminated(
+        ISuperToken _superToken,
+        address _agreementClass,
+        bytes32, //_agreementId,
+        bytes calldata, /*_agreementData*/
+        bytes calldata, //_cbdata,
+        bytes calldata _ctx
+    ) external override onlyHost returns (bytes memory newCtx) {
+        // According to the app basic law, we should never revert in a termination callback
+        if (!_isSameToken(_superToken) || !_isCFAv1(_agreementClass))
+            return _ctx;
+        return _updateOutflow(_ctx);
+    }
+
+    function _isSameToken(ISuperToken superToken) private view returns (bool) {
+        return address(superToken) == address(_acceptedToken);
+    }
+
+    function _isCFAv1(address agreementClass) private view returns (bool) {
+        return
+            ISuperAgreement(agreementClass).agreementType() ==
+            keccak256(
+                "org.superfluid-finance.agreements.ConstantFlowAgreement.v1"
+            );
+    }
+
+    modifier onlyHost() {
+        require(
+            msg.sender == address(_host),
+            "RedirectAll: support only one host"
+        );
+        _;
+    }
+
+    modifier onlyExpected(ISuperToken superToken, address agreementClass) {
+        require(_isSameToken(superToken), "RedirectAll: not accepted token");
+        require(_isCFAv1(agreementClass), "RedirectAll: only CFAv1 supported");
+        _;
+    }
 }

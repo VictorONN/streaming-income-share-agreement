@@ -18,17 +18,24 @@ import {
 } from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
 
 contract IncomeShareAgreement is SuperAppBase {
+    // Investors
     mapping(address => uint256) public investorsAmounts;
     uint256 public totalValueLocked;
-    uint256 public totalValueBorrowed;
 
     //BORROWERS
-    mapping(address => uint256) public outstandingBorrowers;
+    mapping(address => bool) public outstandingBorrowers;
+    mapping(address => uint256) public BorrowerAmounts;
+    uint256 public totalValueBorrowed;
 
-    uint256 public minimumInvestableAmount;
+    uint256 public _MINIMUM_FLOW_RATE;
+    string private constant _ERR_STR_LOW_FLOW_RATE =
+        "SavingsApp: flow rate too low";
     uint256 public maximumBorrowPercentage;
     uint256 public minimumIncomeFlowRate;
     uint256 public interestRate;
+
+    EnumerableSet.AddressSet private _borrowersSet;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     event Received(address, uint256);
 
@@ -83,11 +90,32 @@ contract IncomeShareAgreement is SuperAppBase {
     //         return ratio;
     //     }
 
-    // //deposit ether into the pool
-    // receive() external payable {
-    //     emit Received(msg.sender, msg.value);
-    //     //keep track of the ether
+    //INVESTING-deposit ether into the pool. Maybe deposit tokens directly??
+    receive() external payable {
+        investorsAmounts[msg.sender] += msg.value;        
+        investorsSet.add(investor);
+        emit Received(msg.sender, msg.value);
+        //keep track of the ether
+    }
+
+    // function _invest(
+    //     bytes calldata ctx,
+    //     address agreementClass,
+    //     bytes32 agreementId,
+    //     bytes calldata cbdataaddress
+    // ) private returns (bytes memory newCtx) {
+    //     address investor = abi.decode(cbdata, (address));
+
+    //     (, int96 flowRate, , ) =
+    //         IConstantFlowAgreementV1(agreementClass).getFlowByID(
+    //             _acceptedToken,
+    //             agreementId
+    //         );
+    //     require(flowRate >= _MINIMUM_FLOW_RATE, _ERR_STR_LOW_FLOW_RATE);
+
+    //     investorsSet.add(investor);
     // }
+
 
     function calculateIncomePercentage(
         uint256 _amountToBorrow,
@@ -105,23 +133,6 @@ contract IncomeShareAgreement is SuperAppBase {
         return borrowPercent;
     }
 
-    //Investors deposit other tokens
-    //higher interest rate
-    function supplyFullAmount(address _superToken, uint256 _amount) external {
-        require(_amount >= minimumInvestableAmount, "amount too low");
-        SuperToken superToken = SuperToken(_superToken);
-        IERC20(_superToken).approve(address(this), _mount);
-        superToken.transfer{value: _amount}(address(this));
-        totalValueLocked += _amount;
-    }
-
-    //lower interest rate
-    //to be called externally by other contracts
-    function supplyStream(address superToken, uint256 _amount) external {
-        //initiate Superfluidstream to address(this)
-        totalValueLocked += _amount;
-    }
-
     // function qualifyBorrower(
     //     uint256 _amountToBorrow,
     //     uint256 _incomePerSecond,
@@ -137,26 +148,62 @@ contract IncomeShareAgreement is SuperAppBase {
     //     qualifiedToBorrow[msg.sender] = true;
     // }
 
-    function borrow(
+    function _borrow(
         uint256 _amountToBorrow,
         uint256 _incomePerSecond,
-        uint256 _incomeFlowRate
-    ) public {
-        uint256 borrowPercent =
-            calculateIncomePercentage(_amountToBorrow, _incomeFlowRate);
+        bytes calldata ctx,
+        address agreementClass,
+        bytes32 agreementId,
+        bytes calldata cbdataaddress
+    ) private returns (bytes memory newCtx) {
+        address investor = abi.decode(cbdata, (address));
+        (, int96 flowRate, , ) =
+            IConstantFlowAgreementV1(agreementClass).getFlowByID(
+                _acceptedToken,
+                agreementId
+            );
+        require(flowRate >= _MINIMUM_FLOW_RATE, _ERR_STR_LOW_FLOW_RATE);
+        uint256 borrowPercentage =
+            calculateIncomePercentage(_amountToBorrow, flowRate);
         require(
-            borrowPercent <= maximumBorrowPercentage,
+            borrowPercentage <= maximumBorrowPercentage,
             "above borrow limit, reduce borrowAmount"
         );
-        payable(msg.sender).transfer(_amountToBorrow);
-        repayBorrow(_amountBorrowed);
-        outstandingBorrowers[msg.sender] = _amountToBorrow;
+        amountToPay = _amountToBorrow + interestRate * _amountToBorrow;
+        _repayLoan(amountToPay); //initiate the stream to repay the loan successfully first
+        payable(msg.sender).transfer(_amountToBorrow); //send them the loan amount they need
+
+        outstandingBorrowers[msg.sender]=true; 
+        BorrowerAmounts[msg.sender] = _amountToBorrow;
+        //uncheck this when the payment is complete. How??
     }
 
-    function repayBorrow(uint256 _amountBorrowed) internal {
-        amountToPay = _amountBorrowed + interestRate * _amountBorrowed;
-        //SUPERFLUID STREAM TO TRANSFER FUNDS INSTEAD OF TRANSFERFROM
-        address(this).transferFrom(msg.sender, _amountBorrowed);
+    function _repayLoan(
+        bytes calldata ctx,
+        address agreementClass,
+        bytes32 agreementId,
+        bytes calldata cbdataaddress
+    ) internal returns (bytes memory newCtx) {
+        address borrower = abi.decode(cbdata, (address));
+
+        (, int96 flowRate, , ) =
+            IConstantFlowAgreementV1(agreementClass).getFlowByID(
+                _acceptedToken,
+                agreementId
+            );
+        require(flowRate >= _MINIMUM_FLOW_RATE, _ERR_STR_LOW_FLOW_RATE);
+
+        //how to ensure that loan is totally repaid to
+        _borrowersSet.add(borrower);
+    }
+
+    function completeLoan(bytes calldata _ctx, bytes32 agreementId)
+        private
+        returns (bytes memory newCtx)
+    {
+        address user = host.decodeCtx(_ctx).msgSender;
+        (, int96 flowRate, , ) = cfa.getFlowByID(superToken, agreementId);
+        require(flowRate * )
     }
 
     /**************************************************************************
@@ -177,7 +224,7 @@ contract IncomeShareAgreement is SuperAppBase {
         onlyHost
         returns (bytes memory newCtx)
     {
-        return _updateOutflow(_ctx);
+        return _repayLoan(_ctx);
     }
 
     function afterAgreementUpdated(
@@ -194,7 +241,7 @@ contract IncomeShareAgreement is SuperAppBase {
         onlyHost
         returns (bytes memory newCtx)
     {
-        return _updateOutflow(_ctx);
+        return _repayLoan(_ctx);
     }
 
     function afterAgreementTerminated(
